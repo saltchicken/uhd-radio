@@ -9,26 +9,19 @@ import time
 # ==========================================
 FREQ = 433.92e6
 RATE = 1e6
-GAIN = 75
+GAIN = 60
 
 # For 915MHz, Wavelength (lambda) is ~0.327m.
 # Standard spacing is lambda/2 (~0.16m).
 ANTENNA_SPACING_METERS = 0.163  
-CALIBRATION_PHASE_OFFSET = 0.0  # Set this to "tare" the zero point if needed
-SQUELCH = 0.01
+CALIBRATION_PHASE_OFFSET = 0.0  
+SQUELCH = 0.005
 
 RUNNING = True
 
-
-try:
-    STREAM_MODE_START = uhd.types.StreamMode.start_continuous
-    STREAM_MODE_STOP = uhd.types.StreamMode.stop_continuous
-    MODE_NAME = "Native Continuous"
-except AttributeError:
-    # Fallback for older/different UHD bindings
-    STREAM_MODE_START = uhd.types.StreamMode.num_done
-    STREAM_MODE_STOP = uhd.types.StreamMode.num_done
-    MODE_NAME = "Manual Burst (Fallback)"
+STREAM_MODE_START = uhd.types.StreamMode.start_cont
+STREAM_MODE_STOP = uhd.types.StreamMode.stop_cont
+MODE_NAME = "Native Continuous"
 
 def handler(signum, frame):
     global RUNNING
@@ -51,7 +44,6 @@ def setup_mimo_usrp():
         print("‼️ No USRP found. Ensure a B210 (or MIMO capable device) is connected.")
         sys.exit(1)
 
-
     if usrp.get_rx_num_channels() < 2:
         print(f"‼️ Error: Device only has {usrp.get_rx_num_channels()} channels. MIMO requires 2.")
         sys.exit(1)
@@ -59,27 +51,17 @@ def setup_mimo_usrp():
     print(f"--> Configuring {usrp.get_rx_num_channels()} channels for MIMO...")
 
 
-    # Channel 0 -> RF A, RX1
-    # Channel 1 -> RF A, RX2
-    # This forces the B210 to treat both inputs as active on the same motherboard.
     usrp.set_rx_subdev_spec(uhd.usrp.SubdevSpec("A:A A:B"))
 
-    # Configure parameters for BOTH channels
     for ch in [0, 1]:
         usrp.set_rx_rate(RATE, ch)
-        
-        # Tuning request
         treq = uhd.types.TuneRequest(FREQ)
-        treq.args = uhd.types.DeviceAddr("mode_n=integer") # Force integer-N for better phase noise/coherence
+        treq.args = uhd.types.DeviceAddr("mode_n=integer") 
         usrp.set_rx_freq(treq, ch)
-        
         usrp.set_rx_gain(GAIN, ch)
-        usrp.set_rx_antenna("RX2", ch) # Use RX2 port on both headers
-
+        usrp.set_rx_antenna("RX2", ch) 
 
     usrp.set_time_now(uhd.types.TimeSpec(0.0))
-    
-    # Wait for LOs to lock and settle
     print("--> Waiting for LO Lock...")
     time.sleep(1.0) 
     
@@ -90,33 +72,14 @@ def setup_mimo_usrp():
 # ==========================================
 
 def calculate_aoa(ch0, ch1):
-    """
-    ‼️ Calculates Angle of Arrival (AoA) based on Phase Difference.
-    Assumes a Uniform Linear Array (ULA) configuration.
-    """
-    # 1. Calculate Phase Difference
-    # We multiply Ch1 by the Complex Conjugate of Ch0.
-    # The angle of the result is the phase difference (delta phi).
-    # Averaging over the sample chunk reduces noise significantly.
     correlation_vector = ch1 * np.conj(ch0)
     avg_correlation = np.mean(correlation_vector)
-    
     raw_phase = np.angle(avg_correlation)
 
-    # Apply Calibration Offset
-    # (Wraps phase back to -pi ... pi)
     phase_diff = (raw_phase - CALIBRATION_PHASE_OFFSET + np.pi) % (2 * np.pi) - np.pi
-
-    # 2. Convert Phase to Geometric Angle
-    # Formula: delta_phi = (2 * pi * d * sin(theta)) / lambda
-    # Therefore: theta = arcsin( (delta_phi * lambda) / (2 * pi * d) )
     
     wavelength = 3e8 / FREQ
-    
-    # Calculate the argument for arcsin
     arg = (phase_diff * wavelength) / (2 * np.pi * ANTENNA_SPACING_METERS)
-    
-
     arg = max(-1.0, min(1.0, arg))
 
     theta_rad = np.arcsin(arg)
@@ -125,25 +88,15 @@ def calculate_aoa(ch0, ch1):
     return theta_deg, phase_diff
 
 def ascii_compass(angle_deg):
-    """
-    Renders a simple text-based horizon line.
-    """
-    # -90 (Left) ... 0 (Center) ... 90 (Right)
     width = 50
     center_idx = width // 2
-    
-    # Normalize angle (-90 to 90) to 0.0 to 1.0
     norm = (angle_deg + 90) / 180
     pos = int(norm * (width - 1))
     
-    # Build string
     chars = ['-'] * width
-    chars[center_idx] = '|' # Center marker
-    
-    # Clamp position just in case
+    chars[center_idx] = '|' 
     pos = max(0, min(width-1, pos))
-    chars[pos] = 'O'        # Target marker
-    
+    chars[pos] = 'O'        
     return "".join(chars)
 
 # ==========================================
@@ -151,32 +104,33 @@ def ascii_compass(angle_deg):
 # ==========================================
 
 def run_mimo_loop(usrp):
-
     st_args = uhd.usrp.StreamArgs("fc32", "sc16")
     st_args.channels = [0, 1] 
     streamer = usrp.get_rx_stream(st_args)
 
-    buff_len = 4096
-
+    buff_len = 4096 
     recv_buffer = np.zeros((2, buff_len), dtype=np.complex64)
     metadata = uhd.types.RXMetadata()
-
 
     stream_cmd = uhd.types.StreamCMD(STREAM_MODE_START)
     
 
-    # "Stream Now" is not allowed for MIMO because it doesn't guarantee sample alignment.
+    # To emulate continuous streaming, we must calculate exactly how long the buffer takes
+    # and schedule the next chunk to start exactly when the current one ends.
+    # Duration = Samples / Rate
+    burst_duration = buff_len / RATE
+    
+    # Start schedule 0.05s in the future
+    next_time = usrp.get_time_now() + uhd.types.TimeSpec(0.05)
+    
     stream_cmd.stream_now = False
+    stream_cmd.time_spec = next_time
     
+    if "Continuous" not in MODE_NAME:
+        stream_cmd.num_samps = buff_len
 
-    # to prevent command collisions and timing freezes.
-    
-    if MODE_NAME == "Native Continuous":
-        # Schedule start once
-        stream_cmd.time_spec = usrp.get_time_now() + uhd.types.TimeSpec(0.05)
-        streamer.issue_stream_cmd(stream_cmd)
-    
-    # Manual mode will issue commands inside the loop
+    # Initial Command
+    streamer.issue_stream_cmd(stream_cmd)
 
     print(f"\n--> MIMO Stream Active on {FREQ/1e6} MHz ({MODE_NAME})")
     print(f"--> Antenna Spacing: {ANTENNA_SPACING_METERS*100:.1f} cm")
@@ -186,26 +140,17 @@ def run_mimo_loop(usrp):
 
     while RUNNING:
 
-        if MODE_NAME == "Manual Burst (Fallback)":
-            stream_cmd = uhd.types.StreamCMD(STREAM_MODE_START)
-            stream_cmd.num_samps = buff_len
-            stream_cmd.stream_now = False
-            # Schedule slightly in future to allow command processing
-            stream_cmd.time_spec = usrp.get_time_now() + uhd.types.TimeSpec(0.1)
+        if MODE_NAME == "Pipelined Continuous (Emulated)":
+            next_time += uhd.types.TimeSpec(burst_duration)
+            stream_cmd.time_spec = next_time
             streamer.issue_stream_cmd(stream_cmd)
-            
 
-            # Timeout = Schedule Delay (0.1) + Buffer Duration + overhead
-            timeout = 0.2 
-        else:
-            # Continuous mode just polls
-            timeout = 0.1
-
-        # Attempt receive
-        samps = streamer.recv(recv_buffer, metadata, timeout)
+        # Receive with a timeout slightly longer than the burst duration
+        samps = streamer.recv(recv_buffer, metadata, burst_duration + 0.1)
 
         if metadata.error_code != uhd.types.RXMetadataErrorCode.none:
             if metadata.error_code == uhd.types.RXMetadataErrorCode.overflow:
+                # If we overflow, we just skip a frame, but the pipeline keeps moving
                 continue
             # print(f"Metadata error: {metadata.error_code}")
             continue
@@ -214,33 +159,23 @@ def run_mimo_loop(usrp):
             ch0_data = recv_buffer[0][:samps]
             ch1_data = recv_buffer[1][:samps]
 
-            # 1. Detect Signal Power (using Ch0)
             power = np.mean(np.abs(ch0_data)**2)
             
-            # Only calculate direction if signal is strong enough
-            if power > SQUELCH:
+            if power > SQUELCH: 
                 angle, phase = calculate_aoa(ch0_data, ch1_data)
                 
-                # Rate limit printing to make it readable
                 if time.time() - last_print > 0.1:
                     compass = ascii_compass(angle)
-                    # \r overwrites the current line
                     sys.stdout.write(f"\r[MIMO DF] AoA: {angle:6.1f}° | Phase: {phase:5.2f} rad | [{compass}]")
                     sys.stdout.flush()
                     last_print = time.time()
             else:
                  if time.time() - last_print > 0.5:
-                    sys.stdout.write(f"\r[MIMO DF] ... Listening (Low Signal) ... {' ' * 40}")
+                    sys.stdout.write(f"\r[MIMO DF] ... Listening (Low Signal: {power:.5f}) ... {' ' * 30}")
                     sys.stdout.flush()
                     last_print = time.time()
-        
 
-        if MODE_NAME == "Manual Burst (Fallback)" and samps == 0:
-            time.sleep(0.01)
-
-    # Cleanup
     print("\n--> Stopping Stream...")
-
     streamer.issue_stream_cmd(uhd.types.StreamCMD(STREAM_MODE_STOP))
 
 if __name__ == "__main__":
