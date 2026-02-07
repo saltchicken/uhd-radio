@@ -13,8 +13,8 @@ GAIN = 60
 
 # For 915MHz, Wavelength (lambda) is ~0.327m.
 # Standard spacing is lambda/2 (~0.16m).
-ANTENNA_SPACING_METERS = 0.163  
-CALIBRATION_PHASE_OFFSET = 0.0  
+ANTENNA_SPACING_METERS = 0.163
+CALIBRATION_PHASE_OFFSET = 0.0
 SQUELCH = 0.005
 
 RUNNING = True
