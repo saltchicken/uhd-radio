@@ -4,18 +4,13 @@ import signal
 import sys
 import time
 
-# ==========================================
-
-# ==========================================
 FREQ = 433.92e6
 RATE = 1e6
 GAIN = 60
 
-# For 915MHz, Wavelength (lambda) is ~0.327m.
-# Standard spacing is lambda/2 (~0.16m).
 ANTENNA_SPACING_METERS = 0.163
 
-# ‼️ To calibrate: Set to 0.0, place TX at 0 deg, read 'RawPh' from output, and enter it here.
+# To calibrate: Set to 0.0, place TX at 0 deg, read 'RawPh' from output, and enter it here.
 CALIBRATION_PHASE_OFFSET = 0.0
 SQUELCH = 0.005
 
