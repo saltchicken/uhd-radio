@@ -16,10 +16,6 @@ SQUELCH = 0.005
 
 sig_handler = sdr_utils.SignalHandler()
 
-STREAM_MODE_START = uhd.types.StreamMode.start_cont
-STREAM_MODE_STOP = uhd.types.StreamMode.stop_cont
-MODE_NAME = "Native Continuous"
-
 def calculate_aoa(ch0, ch1):
     correlation_vector = ch1 * np.conj(ch0)
     avg_correlation = np.mean(correlation_vector)
@@ -40,7 +36,8 @@ def run_mimo_loop(usrp, driver):
     recv_buffer = np.zeros((2, buff_len), dtype=np.complex64)
     metadata = uhd.types.RXMetadata()
 
-    stream_cmd = uhd.types.StreamCMD(STREAM_MODE_START)
+
+    stream_cmd = uhd.types.StreamCMD(driver.STREAM_MODE_START)
     burst_duration = buff_len / RATE
     next_time = usrp.get_time_now() + uhd.types.TimeSpec(0.05)
     
@@ -48,7 +45,8 @@ def run_mimo_loop(usrp, driver):
     stream_cmd.time_spec = next_time
     streamer.issue_stream_cmd(stream_cmd)
 
-    print(f"\n--> MIMO Stream Active on {FREQ/1e6} MHz ({MODE_NAME})")
+
+    print(f"\n--> MIMO Stream Active on {FREQ/1e6} MHz ({driver.MODE_NAME})")
     print(f"--> Antenna Spacing: {ANTENNA_SPACING_METERS*100:.1f} cm")
     print("--> Waiting for signal threshold...\n")
 
@@ -79,7 +77,8 @@ def run_mimo_loop(usrp, driver):
                     last_print = time.time()
 
     print("\n--> Stopping Stream...")
-    streamer.issue_stream_cmd(uhd.types.StreamCMD(STREAM_MODE_STOP))
+
+    streamer.issue_stream_cmd(uhd.types.StreamCMD(driver.STREAM_MODE_STOP))
 
 if __name__ == "__main__":
     driver = B210UnifiedDriver(FREQ, RATE, GAIN, num_channels=2)

@@ -2,7 +2,6 @@ import uhd
 import numpy as np
 import threading
 import time
-import sys
 from usrp_driver import B210UnifiedDriver
 import sdr_utils
 
@@ -15,10 +14,6 @@ THRESHOLD = 0.05
 
 
 sig_handler = sdr_utils.SignalHandler()
-
-STREAM_MODE_START = uhd.types.StreamMode.start_cont
-STREAM_MODE_STOP = uhd.types.StreamMode.stop_cont
-MODE_NAME = "Native Continuous"
 
 
 PROBE_TX = sdr_utils.generate_chirp_probe(CHIRP_LEN)
@@ -67,14 +62,16 @@ def tx_daemon(usrp, driver):
             pass
 
 def rx_analysis_loop(usrp, driver): 
-    print(f"   [RX] CSI Analysis Active ({MODE_NAME}).")
+
+    print(f"   [RX] CSI Analysis Active ({driver.MODE_NAME}).")
     rx_streamer = driver.get_rx_streamer()
     
     buff_len = 10000 
     recv_buffer = np.zeros((1, buff_len), dtype=np.complex64)
     metadata = uhd.types.RXMetadata()
     
-    cmd = uhd.types.StreamCMD(STREAM_MODE_START)
+
+    cmd = uhd.types.StreamCMD(driver.STREAM_MODE_START)
     cmd.stream_now = True
     rx_streamer.issue_stream_cmd(cmd)
     
@@ -101,7 +98,8 @@ def rx_analysis_loop(usrp, driver):
                     print(f"   CIR (Time):  [{sdr_utils.ascii_bar_chart(result['pdp'])}]")
                     print(f"   CFR (Freq):  [{sdr_utils.ascii_bar_chart(result['cfr_db'])}]")
 
-    stop_cmd = uhd.types.StreamCMD(STREAM_MODE_STOP)
+
+    stop_cmd = uhd.types.StreamCMD(driver.STREAM_MODE_STOP)
     rx_streamer.issue_stream_cmd(stop_cmd)
 
 if __name__ == "__main__":

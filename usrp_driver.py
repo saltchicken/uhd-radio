@@ -4,10 +4,15 @@ import time
 
 class B210UnifiedDriver:
     """
-    ‼️ Extracted & Generalized class to handle Ettus B210 hardware configuration.
     Supports both Single Channel (SISO) and Dual Channel (MIMO) setups.
     Configures both TX and RX chains.
     """
+    
+
+    STREAM_MODE_START = uhd.types.StreamMode.start_cont
+    STREAM_MODE_STOP = uhd.types.StreamMode.stop_cont
+    MODE_NAME = "Native Continuous"
+
     def __init__(self, freq, rate, gain, num_channels=1, device_args="type=b200"):
         self.freq = freq
         self.rate = rate

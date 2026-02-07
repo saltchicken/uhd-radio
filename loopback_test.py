@@ -15,10 +15,6 @@ GAIN = 50
 
 sig_handler = sdr_utils.SignalHandler()
 
-STREAM_MODE_START = uhd.types.StreamMode.start_cont
-STREAM_MODE_STOP = uhd.types.StreamMode.stop_cont
-MODE_NAME = "Native Continuous"
-
 def tx_daemon(usrp, driver):
     """
     Runs in background. Wakes up once per second to send a pulse.
@@ -48,7 +44,8 @@ def tx_daemon(usrp, driver):
     print("   [TX Daemon] Exiting.")
 
 def run_robust_rx(usrp, driver):
-    print(f"   [RX Main] Starting Loop ({MODE_NAME})...")
+
+    print(f"   [RX Main] Starting Loop ({driver.MODE_NAME})...")
     rx_streamer = driver.get_rx_streamer()
     
     buff_len = int(RX_RATE * 0.05) 
@@ -56,7 +53,8 @@ def run_robust_rx(usrp, driver):
     metadata = uhd.types.RXMetadata()
     
     def issue_start_cmd():
-        cmd = uhd.types.StreamCMD(STREAM_MODE_START)
+
+        cmd = uhd.types.StreamCMD(driver.STREAM_MODE_START)
         cmd.stream_now = True
         rx_streamer.issue_stream_cmd(cmd)
 
@@ -104,7 +102,8 @@ def run_robust_rx(usrp, driver):
                 debug_timer = time.time()
 
     print("   [RX Main] Cleaning up...")
-    stop_cmd = uhd.types.StreamCMD(STREAM_MODE_STOP)
+
+    stop_cmd = uhd.types.StreamCMD(driver.STREAM_MODE_STOP)
     rx_streamer.issue_stream_cmd(stop_cmd)
 
 if __name__ == "__main__":

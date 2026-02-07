@@ -2,7 +2,6 @@ import uhd
 import numpy as np
 import threading
 import time
-import sys
 from usrp_driver import B210UnifiedDriver
 import sdr_utils
 
@@ -16,11 +15,6 @@ MESSAGE = "Hello World"
 
 sig_handler = sdr_utils.SignalHandler()
 
-STREAM_MODE_START = uhd.types.StreamMode.start_cont
-STREAM_MODE_STOP = uhd.types.StreamMode.stop_cont
-MODE_NAME = "Native Continuous"
-
-# ... existing code ...
 def text_to_bits(text):
     bits = []
     for char in text:
@@ -141,7 +135,8 @@ def rx_thread(usrp, driver):
     recv_buffer = np.zeros((1, buff_len), dtype=np.complex64)
     metadata = uhd.types.RXMetadata()
     
-    cmd = uhd.types.StreamCMD(STREAM_MODE_START)
+
+    cmd = uhd.types.StreamCMD(driver.STREAM_MODE_START)
     cmd.stream_now = True
     
     rx_streamer.issue_stream_cmd(cmd)
@@ -170,7 +165,8 @@ def rx_thread(usrp, driver):
                     if len(msg) > 0:
                           print(f"   [RX] 📬 RECEIVED: '{msg}'")
                           
-    stop_cmd = uhd.types.StreamCMD(STREAM_MODE_STOP)
+
+    stop_cmd = uhd.types.StreamCMD(driver.STREAM_MODE_STOP)
     rx_streamer.issue_stream_cmd(stop_cmd)
 
 if __name__ == "__main__":
