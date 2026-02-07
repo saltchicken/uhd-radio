@@ -2,9 +2,8 @@ import uhd
 import numpy as np
 import threading
 import time
-import sys
-import signal
 from usrp_driver import B210UnifiedDriver 
+import sdr_utils
 
 # ==========================================
 # ==========================================
@@ -12,18 +11,13 @@ RX_RATE = 1e6
 TX_RATE = 1e6
 FREQ = 915e6
 GAIN = 50 
-RUNNING = True
 
+
+sig_handler = sdr_utils.SignalHandler()
 
 STREAM_MODE_START = uhd.types.StreamMode.start_cont
 STREAM_MODE_STOP = uhd.types.StreamMode.stop_cont
 MODE_NAME = "Native Continuous"
-
-def handler(signum, frame):
-    global RUNNING
-    print("\n--> Signal caught. Shutting down...")
-    RUNNING = False
-signal.signal(signal.SIGINT, handler)
 
 def tx_daemon(usrp, driver):
     """
@@ -41,7 +35,8 @@ def tx_daemon(usrp, driver):
     md.start_of_burst = True
     md.end_of_burst = True
     
-    while RUNNING:
+
+    while sig_handler.running:
         try:
             md.has_time_spec = False
             tx_streamer.send(tone.reshape(1, -1), md)
@@ -63,7 +58,6 @@ def run_robust_rx(usrp, driver):
     def issue_start_cmd():
         cmd = uhd.types.StreamCMD(STREAM_MODE_START)
         cmd.stream_now = True
-
         rx_streamer.issue_stream_cmd(cmd)
 
     issue_start_cmd()
@@ -72,9 +66,8 @@ def run_robust_rx(usrp, driver):
     silence_counter = 0
     debug_timer = time.time()
     
-    while RUNNING:
 
-            
+    while sig_handler.running:
         samps = rx_streamer.recv(recv_buffer, metadata, 0.1)
         
         if metadata.error_code != uhd.types.RXMetadataErrorCode.none:

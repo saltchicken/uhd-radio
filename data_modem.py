@@ -3,8 +3,8 @@ import numpy as np
 import threading
 import time
 import sys
-import signal
 from usrp_driver import B210UnifiedDriver
+import sdr_utils
 
 RX_RATE = 1e6
 TX_RATE = 1e6
@@ -12,19 +12,15 @@ FREQ = 915e6
 GAIN = 50
 SPS = 100
 MESSAGE = "Hello World" 
-RUNNING = True
 
+
+sig_handler = sdr_utils.SignalHandler()
 
 STREAM_MODE_START = uhd.types.StreamMode.start_cont
 STREAM_MODE_STOP = uhd.types.StreamMode.stop_cont
 MODE_NAME = "Native Continuous"
 
-def handler(signum, frame):
-    global RUNNING
-    print("\n--> Signal caught. Shutting down...")
-    RUNNING = False
-signal.signal(signal.SIGINT, handler)
-
+# ... existing code ...
 def text_to_bits(text):
     bits = []
     for char in text:
@@ -129,7 +125,8 @@ def tx_daemon(usrp, driver):
     print(f"   [TX Daemon] Packet size: {len(tx_buffer)} samples")
     print("   [TX Daemon] Broadcasting every 2.0s...")
     
-    while RUNNING:
+
+    while sig_handler.running:
         try:
             tx_streamer.send(tx_buffer.reshape(1, -1), md)
             time.sleep(2.0) 
@@ -147,18 +144,15 @@ def rx_thread(usrp, driver):
     cmd = uhd.types.StreamCMD(STREAM_MODE_START)
     cmd.stream_now = True
     
-
     rx_streamer.issue_stream_cmd(cmd)
     
-    while RUNNING:
 
-            
+    while sig_handler.running:
         samps = rx_streamer.recv(recv_buffer, metadata, 0.1)
         
         if metadata.error_code != uhd.types.RXMetadataErrorCode.none:
             if metadata.error_code == uhd.types.RXMetadataErrorCode.overflow:
                 continue
-
             continue
             
         if samps > 0:
@@ -174,8 +168,8 @@ def rx_thread(usrp, driver):
                     packet_chunk = data[start_idx : start_idx + 20000]
                     msg = demodulate_dbpsk_robust(packet_chunk)
                     if len(msg) > 0:
-                         print(f"   [RX] 📬 RECEIVED: '{msg}'")
-                         
+                          print(f"   [RX] 📬 RECEIVED: '{msg}'")
+                          
     stop_cmd = uhd.types.StreamCMD(STREAM_MODE_STOP)
     rx_streamer.issue_stream_cmd(stop_cmd)
 

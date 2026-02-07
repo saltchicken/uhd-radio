@@ -1,9 +1,9 @@
 import uhd
 import numpy as np
-import signal
 import sys
 import time
 from usrp_driver import B210UnifiedDriver 
+import sdr_utils
 
 FREQ = 433.92e6
 RATE = 1e6
@@ -13,17 +13,12 @@ ANTENNA_SPACING_METERS = 0.163
 CALIBRATION_PHASE_OFFSET = 0.0
 SQUELCH = 0.005
 
-RUNNING = True
+
+sig_handler = sdr_utils.SignalHandler()
 
 STREAM_MODE_START = uhd.types.StreamMode.start_cont
 STREAM_MODE_STOP = uhd.types.StreamMode.stop_cont
 MODE_NAME = "Native Continuous"
-
-def handler(signum, frame):
-    global RUNNING
-    print("\n--> Signal caught. Shutting down...")
-    RUNNING = False
-signal.signal(signal.SIGINT, handler)
 
 def calculate_aoa(ch0, ch1):
     correlation_vector = ch1 * np.conj(ch0)
@@ -36,16 +31,7 @@ def calculate_aoa(ch0, ch1):
     theta_deg = np.degrees(np.arcsin(arg))
     return theta_deg, phase_diff, raw_phase
 
-def ascii_compass(angle_deg):
-    width = 50
-    center_idx = width // 2
-    norm = (angle_deg + 90) / 180
-    pos = int(norm * (width - 1))
-    chars = ['-'] * width
-    chars[center_idx] = '|'
-    pos = max(0, min(width-1, pos))
-    chars[pos] = 'O'
-    return "".join(chars)
+
 
 def run_mimo_loop(usrp, driver):
     streamer = driver.get_rx_streamer()
@@ -60,9 +46,6 @@ def run_mimo_loop(usrp, driver):
     
     stream_cmd.stream_now = False
     stream_cmd.time_spec = next_time
-    
-
-
     streamer.issue_stream_cmd(stream_cmd)
 
     print(f"\n--> MIMO Stream Active on {FREQ/1e6} MHz ({MODE_NAME})")
@@ -71,9 +54,8 @@ def run_mimo_loop(usrp, driver):
 
     last_print = 0
 
-    while RUNNING:
 
-
+    while sig_handler.running:
         samps = streamer.recv(recv_buffer, metadata, burst_duration + 0.1)
 
         if metadata.error_code != uhd.types.RXMetadataErrorCode.none:
@@ -90,7 +72,8 @@ def run_mimo_loop(usrp, driver):
                 rssi_db = 10 * np.log10(power + 1e-12)
 
                 if time.time() - last_print > 0.1:
-                    compass = ascii_compass(angle)
+
+                    compass = sdr_utils.ascii_compass(angle)
                     sys.stdout.write(f"\r[MIMO] RSSI: {rssi_db:3.0f}dB | AoA: {angle:5.1f}° | RawPh: {raw_phase:5.2f} | [{compass}]")
                     sys.stdout.flush()
                     last_print = time.time()

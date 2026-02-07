@@ -2,8 +2,8 @@ import uhd
 import numpy as np
 import threading
 import time
-import signal
 from usrp_driver import B210UnifiedDriver 
+import sdr_utils
 
 FREQ = 915e6
 RATE = 1e6
@@ -11,27 +11,16 @@ GAIN = 60
 CHIRP_LEN = 256
 GAP_LEN = 2000
 THRESHOLD = 0.05
-RUNNING = True
 
+
+sig_handler = sdr_utils.SignalHandler()
 
 STREAM_MODE_START = uhd.types.StreamMode.start_cont
 STREAM_MODE_STOP = uhd.types.StreamMode.stop_cont
 MODE_NAME = "Native Continuous"
 
-def handler(signum, frame):
-    global RUNNING
-    print("\n--> Signal caught. Shutting down...")
-    RUNNING = False
-signal.signal(signal.SIGINT, handler)
 
-def generate_chirp_probe(length):
-    t = np.arange(length)
-    k = 1.0 
-    chirp = np.exp(1j * np.pi * k * (t**2 / length))
-    window = np.hanning(length)
-    return (chirp * window).astype(np.complex64) * 0.7
-
-PROBE_TX = generate_chirp_probe(CHIRP_LEN)
+PROBE_TX = sdr_utils.generate_chirp_probe(CHIRP_LEN)
 PROBE_REF = np.conj(PROBE_TX[::-1]) 
 
 def analyze_channel_response(rx_chunk, sample_rate=RATE):
@@ -57,19 +46,7 @@ def analyze_channel_response(rx_chunk, sample_rate=RATE):
         "profile": mag
     }
 
-def ascii_sparkline(data, width=40):
-    if len(data) == 0: return ""
-    chunk_size = max(1, len(data) // width)
-    reduced = [np.max(data[i:i+chunk_size]) for i in range(0, len(data), chunk_size)]
-    reduced = reduced[:width]
-    chars = " _.-=oO#"
-    m = np.max(reduced)
-    if m == 0: return "_" * width
-    line = ""
-    for val in reduced:
-        idx = int((val / m) * (len(chars) - 1))
-        line += chars[idx]
-    return line
+
 
 def tx_daemon(usrp, driver):
     print("   [TX] Sounding Daemon Active.")
@@ -82,7 +59,8 @@ def tx_daemon(usrp, driver):
     md.start_of_burst = True
     md.end_of_burst = True
     
-    while RUNNING:
+
+    while sig_handler.running:
         try:
             md.has_time_spec = False
             tx_streamer.send(frame.reshape(1, -1), md)
@@ -100,13 +78,10 @@ def rx_analysis_loop(usrp, driver):
     
     cmd = uhd.types.StreamCMD(STREAM_MODE_START)
     cmd.stream_now = True
-
-
     rx_streamer.issue_stream_cmd(cmd)
     
-    while RUNNING:
 
-            
+    while sig_handler.running:
         samps = rx_streamer.recv(recv_buffer, metadata, 0.1)
         
         if metadata.error_code != uhd.types.RXMetadataErrorCode.none:
@@ -123,7 +98,9 @@ def rx_analysis_loop(usrp, driver):
                     start_view = max(0, center - 40)
                     end_view = min(len(results['profile']), center + 40)
                     view_data = results['profile'][start_view:end_view]
-                    graph = ascii_sparkline(view_data)
+                    
+
+                    graph = sdr_utils.ascii_sparkline(view_data)
                     print(f"   [CIS] SNR: {results['snr_db']:.1f}dB | Peak: {results['peak_val']:.3f}")
                     print(f"          Impulse: [{graph}]")
 
