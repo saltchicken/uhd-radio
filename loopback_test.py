@@ -4,48 +4,33 @@ import threading
 import time
 import sys
 import signal
+from usrp_driver import B210UnifiedDriver 
 
 # ==========================================
-
 # ==========================================
 RX_RATE = 1e6
 TX_RATE = 1e6
 FREQ = 915e6
-
 GAIN = 50 
 RUNNING = True
 
 
-try:
-    STREAM_MODE_START = uhd.types.StreamMode.start_continuous
-    STREAM_MODE_STOP = uhd.types.StreamMode.stop_continuous
-    MODE_NAME = "Native Continuous"
-except AttributeError:
-    # Fallback for versions where start_continuous is missing/renamed
-    STREAM_MODE_START = uhd.types.StreamMode.num_done
-    STREAM_MODE_STOP = uhd.types.StreamMode.num_done
-    MODE_NAME = "Manual Burst (Fallback)"
+STREAM_MODE_START = uhd.types.StreamMode.start_cont
+STREAM_MODE_STOP = uhd.types.StreamMode.stop_cont
+MODE_NAME = "Native Continuous"
 
 def handler(signum, frame):
     global RUNNING
     print("\n--> Signal caught. Shutting down...")
     RUNNING = False
-
 signal.signal(signal.SIGINT, handler)
 
-# ==========================================
-
-# ==========================================
-def tx_daemon(usrp):
+def tx_daemon(usrp, driver):
     """
     Runs in background. Wakes up once per second to send a pulse.
     """
     print("   [TX Daemon] Launched.")
-    
-    st_args = uhd.usrp.StreamArgs("fc32", "sc16")
-    st_args.channels = [0]
-    tx_streamer = usrp.get_tx_stream(st_args)
-    
+    tx_streamer = driver.get_tx_streamer()
 
     num_samps = int(TX_RATE * 0.05) 
     t = np.arange(num_samps) / TX_RATE
@@ -60,9 +45,6 @@ def tx_daemon(usrp):
         try:
             md.has_time_spec = False
             tx_streamer.send(tone.reshape(1, -1), md)
-            
-
-            # print("   [TX Daemon] --> Pulse Sent") 
             time.sleep(1.0)
         except Exception as e:
             print(f"   [TX Daemon] Error: {e}")
@@ -70,21 +52,10 @@ def tx_daemon(usrp):
             
     print("   [TX Daemon] Exiting.")
 
-# ==========================================
-
-# ==========================================
-def run_robust_rx(usrp):
-    """
-    Main thread strictly handles RX.
-    Includes 'Watchdog' logic to restart stream if it dies.
-    """
+def run_robust_rx(usrp, driver):
     print(f"   [RX Main] Starting Loop ({MODE_NAME})...")
+    rx_streamer = driver.get_rx_streamer()
     
-    st_args = uhd.usrp.StreamArgs("fc32", "sc16")
-    st_args.channels = [0]
-    rx_streamer = usrp.get_rx_stream(st_args)
-    
-    # Buffer Setup
     buff_len = int(RX_RATE * 0.05) 
     recv_buffer = np.zeros((1, buff_len), dtype=np.complex64)
     metadata = uhd.types.RXMetadata()
@@ -92,8 +63,7 @@ def run_robust_rx(usrp):
     def issue_start_cmd():
         cmd = uhd.types.StreamCMD(STREAM_MODE_START)
         cmd.stream_now = True
-        if MODE_NAME == "Manual Burst (Fallback)":
-            cmd.num_samps = buff_len 
+
         rx_streamer.issue_stream_cmd(cmd)
 
     issue_start_cmd()
@@ -103,8 +73,7 @@ def run_robust_rx(usrp):
     debug_timer = time.time()
     
     while RUNNING:
-        if MODE_NAME == "Manual Burst (Fallback)":
-            issue_start_cmd()
+
             
         samps = rx_streamer.recv(recv_buffer, metadata, 0.1)
         
@@ -125,13 +94,10 @@ def run_robust_rx(usrp):
 
         if samps > 0:
             silence_counter = 0
-            
             data_chunk = recv_buffer[0][:samps]
-            # Calculate raw amplitude
             magnitudes = np.abs(data_chunk)
             peak = np.max(magnitudes)
             avg = np.mean(magnitudes)
-            
 
             if peak > 0.01: 
                 pkts_received += 1
@@ -140,8 +106,6 @@ def run_robust_rx(usrp):
                 bar = "#" * bar_len
                 print(f"   [RX] Pkt #{pkts_received} | Amp: {peak:.4f} | {bar}")
             
-
-            # This proves the RX is actually working, even if no packets are found.
             if time.time() - debug_timer > 1.0:
                 print(f"   [RX Status] Noise Floor: {avg:.6f} | listening...")
                 debug_timer = time.time()
@@ -150,36 +114,16 @@ def run_robust_rx(usrp):
     stop_cmd = uhd.types.StreamCMD(STREAM_MODE_STOP)
     rx_streamer.issue_stream_cmd(stop_cmd)
 
-
 if __name__ == "__main__":
-    print("--> Initializing B210...")
+    print("--> Initializing B210 Loopback...")
+    driver = B210UnifiedDriver(FREQ, RX_RATE, GAIN)
+    usrp = driver.initialize()
     
-    try:
-        usrp = uhd.usrp.MultiUSRP("type=b200")
-    except RuntimeError:
-        print("‼️ Device not found.")
-        sys.exit(1)
-        
-    # Config
-    usrp.set_rx_rate(RX_RATE, 0)
-    usrp.set_tx_rate(TX_RATE, 0)
-    usrp.set_rx_freq(uhd.types.TuneRequest(FREQ), 0)
-    usrp.set_tx_freq(uhd.types.TuneRequest(FREQ), 0)
-    usrp.set_rx_gain(GAIN, 0)
-    usrp.set_tx_gain(GAIN, 0)
-    
-
-    usrp.set_tx_antenna("TX/RX", 0)
-    usrp.set_rx_antenna("RX2", 0)
-    
-    print("--> Waiting for LO Lock...")
-    time.sleep(1.0)
-    
-    tx_t = threading.Thread(target=tx_daemon, args=(usrp,))
+    tx_t = threading.Thread(target=tx_daemon, args=(usrp, driver))
     tx_t.daemon = True 
     tx_t.start()
     
     try:
-        run_robust_rx(usrp)
+        run_robust_rx(usrp, driver)
     except KeyboardInterrupt:
         pass
