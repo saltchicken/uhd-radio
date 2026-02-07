@@ -138,3 +138,49 @@ def ascii_compass(angle_deg):
     pos = max(0, min(width-1, pos))
     chars[pos] = 'O'
     return "".join(chars)
+
+def ascii_dual_gauge(value, max_val, width=40):
+    """
+    ‼️ Added for Doppler Radar.
+    Visualizes positive (Approaching) vs negative (Receding) values.
+    [-10 .... 0 .... +10]
+    """
+    mid = width // 2
+    chars = [' '] * width
+    chars[mid] = '|'
+    
+    # Normalize value to fit half-width
+    norm_val = value / max_val
+    bar_len = int(abs(norm_val) * (mid - 1))
+    bar_len = min(mid - 1, bar_len)
+    
+    if value > 0:
+        # Fill right side
+        for i in range(mid + 1, mid + 1 + bar_len):
+            chars[i] = '>'
+    elif value < 0:
+        # Fill left side
+        for i in range(mid - 1, mid - 1 - bar_len, -1):
+            chars[i] = '<'
+            
+    return "".join(chars)
+
+def ascii_density_map(data, min_db=-90, max_db=-30):
+    """
+    ‼️ Added for Waterfall Plotter.
+    Maps an array of dB values to density characters.
+    """
+    # Characters ordered by increasing density/visual weight
+    chars = " .:-=+*#%@"
+    line = ""
+    for val in data:
+        if val < min_db:
+            norm = 0.0
+        elif val > max_db:
+            norm = 1.0
+        else:
+            norm = (val - min_db) / (max_db - min_db)
+            
+        idx = int(norm * (len(chars) - 1))
+        line += chars[idx]
+    return line
