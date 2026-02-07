@@ -1,59 +1,33 @@
 import uhd
 import numpy as np
-import threading
 import time
-from usrp_driver import B210UnifiedDriver 
+
+from usrp_driver import B210UnifiedDriver, PeriodicTransmitter 
 import sdr_utils
 
-# ==========================================
-# ==========================================
-RX_RATE = 1e6
-TX_RATE = 1e6
-FREQ = 915e6
-GAIN = 50 
 
+args = sdr_utils.get_standard_args("Loopback Test", default_gain=50)
 
 sig_handler = sdr_utils.SignalHandler()
 
-def tx_daemon(usrp, driver):
-    """
-    Runs in background. Wakes up once per second to send a pulse.
-    """
-    print("   [TX Daemon] Launched.")
-    tx_streamer = driver.get_tx_streamer()
 
-    num_samps = int(TX_RATE * 0.05) 
-    t = np.arange(num_samps) / TX_RATE
-    tone = 0.7 * np.exp(1j * 2 * np.pi * 50e3 * t)
-    tone = tone.astype(np.complex64)
-    
-    md = uhd.types.TXMetadata()
-    md.start_of_burst = True
-    md.end_of_burst = True
-    
+def generate_tone_frame(rate, duration=0.05, freq=50e3):
+    num_samps = int(rate * duration)
+    t = np.arange(num_samps) / rate
+    tone = 0.7 * np.exp(1j * 2 * np.pi * freq * t)
+    return tone.astype(np.complex64)
 
-    while sig_handler.running:
-        try:
-            md.has_time_spec = False
-            tx_streamer.send(tone.reshape(1, -1), md)
-            time.sleep(1.0)
-        except Exception as e:
-            print(f"   [TX Daemon] Error: {e}")
-            time.sleep(1.0)
-            
-    print("   [TX Daemon] Exiting.")
+TX_FRAME = generate_tone_frame(args.rate)
 
 def run_robust_rx(usrp, driver):
-
     print(f"   [RX Main] Starting Loop ({driver.MODE_NAME})...")
     rx_streamer = driver.get_rx_streamer()
     
-    buff_len = int(RX_RATE * 0.05) 
+    buff_len = int(args.rate * 0.05) 
     recv_buffer = np.zeros((1, buff_len), dtype=np.complex64)
     metadata = uhd.types.RXMetadata()
     
     def issue_start_cmd():
-
         cmd = uhd.types.StreamCMD(driver.STREAM_MODE_START)
         cmd.stream_now = True
         rx_streamer.issue_stream_cmd(cmd)
@@ -64,7 +38,6 @@ def run_robust_rx(usrp, driver):
     silence_counter = 0
     debug_timer = time.time()
     
-
     while sig_handler.running:
         samps = rx_streamer.recv(recv_buffer, metadata, 0.1)
         
@@ -102,18 +75,16 @@ def run_robust_rx(usrp, driver):
                 debug_timer = time.time()
 
     print("   [RX Main] Cleaning up...")
-
-    stop_cmd = uhd.types.StreamCMD(driver.STREAM_MODE_STOP)
-    rx_streamer.issue_stream_cmd(stop_cmd)
+    rx_streamer.issue_stream_cmd(uhd.types.StreamCMD(driver.STREAM_MODE_STOP))
 
 if __name__ == "__main__":
     print("--> Initializing B210 Loopback...")
-    driver = B210UnifiedDriver(FREQ, RX_RATE, GAIN)
+    driver = B210UnifiedDriver(args.freq, args.rate, args.gain)
     usrp = driver.initialize()
     
-    tx_t = threading.Thread(target=tx_daemon, args=(usrp, driver))
-    tx_t.daemon = True 
-    tx_t.start()
+
+    tx_thread = PeriodicTransmitter(driver, sig_handler, TX_FRAME, interval=1.0)
+    tx_thread.start()
     
     try:
         run_robust_rx(usrp, driver)

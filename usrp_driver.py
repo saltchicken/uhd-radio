@@ -1,6 +1,7 @@
 import uhd
 import sys
 import time
+import threading
 
 class B210UnifiedDriver:
     """
@@ -8,7 +9,6 @@ class B210UnifiedDriver:
     Configures both TX and RX chains.
     """
     
-
     STREAM_MODE_START = uhd.types.StreamMode.start_cont
     STREAM_MODE_STOP = uhd.types.StreamMode.stop_cont
     MODE_NAME = "Native Continuous"
@@ -33,11 +33,9 @@ class B210UnifiedDriver:
             print("‼️ No USRP found. Ensure a B210 is connected.")
             sys.exit(1)
 
-
         if self.usrp.get_rx_num_channels() < self.num_channels:
             print(f"‼️ Error: Device has {self.usrp.get_rx_num_channels()} channels. App requires {self.num_channels}.")
             sys.exit(1)
-
 
         if self.num_channels == 2:
             print("--> Applying MIMO Subdev Spec (A:A A:B)...")
@@ -61,7 +59,6 @@ class B210UnifiedDriver:
             self.usrp.set_tx_gain(self.gain, ch)
             self.usrp.set_tx_antenna("TX/RX", ch)
 
-
         self.usrp.set_time_now(uhd.types.TimeSpec(0.0))
         
         print("--> Waiting for LO Lock...")
@@ -70,9 +67,7 @@ class B210UnifiedDriver:
         return self.usrp
 
     def get_rx_streamer(self):
-        """
-        Helper to get the RX streamer for active channels.
-        """
+        """Helper to get the RX streamer for active channels."""
         if not self.usrp:
             raise RuntimeError("USRP not initialized.")
             
@@ -81,12 +76,45 @@ class B210UnifiedDriver:
         return self.usrp.get_rx_stream(st_args)
 
     def get_tx_streamer(self):
-        """
-        Helper to get the TX streamer for active channels.
-        """
+        """Helper to get the TX streamer for active channels."""
         if not self.usrp:
             raise RuntimeError("USRP not initialized.")
             
         st_args = uhd.usrp.StreamArgs("fc32", "sc16")
         st_args.channels = list(range(self.num_channels))
         return self.usrp.get_tx_stream(st_args)
+
+
+class PeriodicTransmitter(threading.Thread):
+    """
+    ‼️ Runs in a background thread.
+    Handles the `while running: send; sleep` logic found in almost every script.
+    """
+    def __init__(self, driver, sig_handler, frame_data, interval=1.0):
+        super().__init__()
+        self.driver = driver
+        self.handler = sig_handler
+        self.frame = frame_data
+        self.interval = interval
+        self.daemon = True # Ensures thread dies when main app exits
+
+    def run(self):
+        print(f"   [TX] Background Transmitter Active (Every {self.interval}s)")
+        tx_streamer = self.driver.get_tx_streamer()
+        
+        # Pre-configure metadata
+        md = uhd.types.TXMetadata()
+        md.start_of_burst = True
+        md.end_of_burst = True
+        
+        # Reshape once for performance
+        reshaped_frame = self.frame.reshape(1, -1)
+
+        while self.handler.running:
+            try:
+                md.has_time_spec = False
+                tx_streamer.send(reshaped_frame, md)
+                time.sleep(self.interval)
+            except Exception as e:
+                # Silent fail to avoid spamming console on shutdown
+                pass

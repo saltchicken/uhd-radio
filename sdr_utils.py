@@ -1,8 +1,7 @@
 import signal
 import numpy as np
 import sys
-
-
+import argparse
 
 class SignalHandler:
     """
@@ -17,23 +16,56 @@ class SignalHandler:
         print("\n--> Signal caught. Shutting down...")
         self.running = False
 
+
+def get_standard_args(description, default_freq=915e6, default_rate=1e6, default_gain=60):
+    """
+    ‼️ Extracted CLI argument parsing. 
+    Allows runtime configuration: python app.py --freq 915e6 --gain 70
+    """
+    parser = argparse.ArgumentParser(description=description)
+    parser.add_argument("--freq", type=float, default=default_freq, help="Center Frequency (Hz)")
+    parser.add_argument("--rate", type=float, default=default_rate, help="Sample Rate (Hz)")
+    parser.add_argument("--gain", type=float, default=default_gain, help="RX/TX Gain (dB)")
+    return parser.parse_args()
+
 def generate_chirp_probe(length):
-    """
-    ‼️ Extracted chirp generation.
-    Used by channel_sounding, csi_analysis, and object_detection.
-    """
     t = np.arange(length)
     k = 1.0 
     chirp = np.exp(1j * np.pi * k * (t**2 / length))
     window = np.hanning(length)
     return (chirp * window).astype(np.complex64) * 0.7
 
+
+def correlate_and_detect(rx_chunk, probe_sequence):
+    """
+    ‼️ Consolidates the correlation, magnitude, and SNR calculation 
+    used in channel_sounding, csi_analysis, and object_detection.
+    """
+    correlation = np.correlate(rx_chunk, probe_sequence, mode='valid')
+    mag = np.abs(correlation)
+    peak_idx = np.argmax(mag)
+    peak_val = mag[peak_idx]
+    
+    # Estimate noise floor (simple approach: look before the peak)
+    if peak_idx > 20:
+        noise_region = mag[:peak_idx-10]
+        noise_floor = np.mean(noise_region) if len(noise_region) > 0 else 1e-9
+    else:
+        noise_floor = 1e-9
+        
+    snr_linear = peak_val / (noise_floor + 1e-12)
+    snr_db = 10 * np.log10(snr_linear)
+    
+    return {
+        "correlation": correlation,
+        "mag": mag,
+        "peak_idx": peak_idx,
+        "peak_val": peak_val,
+        "snr_db": snr_db,
+        "noise_floor": noise_floor
+    }
+
 def calculate_csi_metrics(cir_window, sample_rate):
-    """
-    ‼️ Extracted CSI metric calculation.
-    Unifies logic from csi_analysis and object_detection.
-    Returns dictionary with all metrics including linear CFR for detection.
-    """
     pdp = np.abs(cir_window)**2
     thresh = np.max(pdp) * 0.1
     valid_indices = np.where(pdp > thresh)[0]
@@ -68,9 +100,6 @@ def calculate_csi_metrics(cir_window, sample_rate):
     }
 
 def ascii_sparkline(data, width=40):
-    """
-    ‼️ Extracted sparkline visualizer.
-    """
     if len(data) == 0: return ""
     chunk_size = max(1, len(data) // width)
     reduced = [np.max(data[i:i+chunk_size]) for i in range(0, len(data), chunk_size)]
@@ -85,9 +114,6 @@ def ascii_sparkline(data, width=40):
     return line
 
 def ascii_bar_chart(data, width=40):
-    """
-    ‼️ Extracted bar chart visualizer (unicode blocks).
-    """
     if len(data) == 0: return ""
     d_min, d_max = np.min(data), np.max(data)
     if d_max == d_min: norm_data = np.zeros_like(data)
@@ -103,9 +129,6 @@ def ascii_bar_chart(data, width=40):
     return line
 
 def ascii_compass(angle_deg):
-    """
-    ‼️ Extracted compass visualizer.
-    """
     width = 50
     center_idx = width // 2
     norm = (angle_deg + 90) / 180

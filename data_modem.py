@@ -1,17 +1,16 @@
 import uhd
 import numpy as np
-import threading
 import time
-from usrp_driver import B210UnifiedDriver
+import threading
+
+from usrp_driver import B210UnifiedDriver, PeriodicTransmitter
 import sdr_utils
 
-RX_RATE = 1e6
-TX_RATE = 1e6
-FREQ = 915e6
-GAIN = 50
+
+args = sdr_utils.get_standard_args("DBPSK Data Modem", default_gain=50)
+
 SPS = 100
 MESSAGE = "Hello World" 
-
 
 sig_handler = sdr_utils.SignalHandler()
 
@@ -41,10 +40,12 @@ def modulate_dbpsk(text):
     samples = []
     current_phase = 0.0
 
+    # Sync sequence
     for _ in range(50):
         symbol = np.exp(1j * current_phase)
         samples.append(symbol)
 
+    # Start delimiter
     current_phase += np.pi
     samples.append(np.exp(1j * current_phase))
         
@@ -104,29 +105,6 @@ def demodulate_dbpsk_robust(rx_chunk):
 
     return best_text
 
-def tx_daemon(usrp, driver):
-    print("   [TX Daemon] Modulating message...")
-    tx_data = modulate_dbpsk(MESSAGE)
-    padding = np.zeros(2000, dtype=np.complex64)
-    tx_buffer = np.concatenate([padding, tx_data, padding])
-    tx_streamer = driver.get_tx_streamer()
-    
-    md = uhd.types.TXMetadata()
-    md.start_of_burst = True
-    md.end_of_burst = True
-    md.has_time_spec = False
-    
-    print(f"   [TX Daemon] Packet size: {len(tx_buffer)} samples")
-    print("   [TX Daemon] Broadcasting every 2.0s...")
-    
-
-    while sig_handler.running:
-        try:
-            tx_streamer.send(tx_buffer.reshape(1, -1), md)
-            time.sleep(2.0) 
-        except Exception:
-            pass
-
 def rx_thread(usrp, driver):
     print(f"   [RX Main] Listening for Data...")
     rx_streamer = driver.get_rx_streamer()
@@ -135,13 +113,10 @@ def rx_thread(usrp, driver):
     recv_buffer = np.zeros((1, buff_len), dtype=np.complex64)
     metadata = uhd.types.RXMetadata()
     
-
     cmd = uhd.types.StreamCMD(driver.STREAM_MODE_START)
     cmd.stream_now = True
-    
     rx_streamer.issue_stream_cmd(cmd)
     
-
     while sig_handler.running:
         samps = rx_streamer.recv(recv_buffer, metadata, 0.1)
         
@@ -165,18 +140,22 @@ def rx_thread(usrp, driver):
                     if len(msg) > 0:
                           print(f"   [RX] 📬 RECEIVED: '{msg}'")
                           
-
-    stop_cmd = uhd.types.StreamCMD(driver.STREAM_MODE_STOP)
-    rx_streamer.issue_stream_cmd(stop_cmd)
+    rx_streamer.issue_stream_cmd(uhd.types.StreamCMD(driver.STREAM_MODE_STOP))
 
 if __name__ == "__main__":
     print("--> Initializing Data Modem...")
-    driver = B210UnifiedDriver(FREQ, RX_RATE, GAIN)
+    driver = B210UnifiedDriver(args.freq, args.rate, args.gain)
     usrp = driver.initialize()
     
-    t = threading.Thread(target=tx_daemon, args=(usrp, driver))
-    t.daemon = True
-    t.start()
+
+    # Replaces the specific tx_daemon logic which was just a loop anyway
+    print(f"   [TX] Modulating '{MESSAGE}'...")
+    tx_data = modulate_dbpsk(MESSAGE)
+    padding = np.zeros(2000, dtype=np.complex64)
+    TX_FRAME = np.concatenate([padding, tx_data, padding])
+
+    tx_thread = PeriodicTransmitter(driver, sig_handler, TX_FRAME, interval=2.0)
+    tx_thread.start()
     
     try:
         rx_thread(usrp, driver)
