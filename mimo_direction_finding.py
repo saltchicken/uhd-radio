@@ -14,6 +14,8 @@ GAIN = 60
 # For 915MHz, Wavelength (lambda) is ~0.327m.
 # Standard spacing is lambda/2 (~0.16m).
 ANTENNA_SPACING_METERS = 0.163
+
+# ‼️ To calibrate: Set to 0.0, place TX at 0 deg, read 'RawPh' from output, and enter it here.
 CALIBRATION_PHASE_OFFSET = 0.0
 SQUELCH = 0.005
 
@@ -74,8 +76,10 @@ def setup_mimo_usrp():
 def calculate_aoa(ch0, ch1):
     correlation_vector = ch1 * np.conj(ch0)
     avg_correlation = np.mean(correlation_vector)
+    # ‼️ Extract the raw phase before calibration
     raw_phase = np.angle(avg_correlation)
 
+    # ‼️ Apply the calibration offset
     phase_diff = (raw_phase - CALIBRATION_PHASE_OFFSET + np.pi) % (2 * np.pi) - np.pi
     
     wavelength = 3e8 / FREQ
@@ -85,7 +89,8 @@ def calculate_aoa(ch0, ch1):
     theta_rad = np.arcsin(arg)
     theta_deg = np.degrees(theta_rad)
     
-    return theta_deg, phase_diff
+    # ‼️ Return raw_phase so we can display it for calibration
+    return theta_deg, phase_diff, raw_phase
 
 def ascii_compass(angle_deg):
     width = 50
@@ -162,11 +167,16 @@ def run_mimo_loop(usrp):
             power = np.mean(np.abs(ch0_data)**2)
             
             if power > SQUELCH: 
-                angle, phase = calculate_aoa(ch0_data, ch1_data)
+                # ‼️ unpack raw_phase from the update
+                angle, phase, raw_phase = calculate_aoa(ch0_data, ch1_data)
                 
+                # ‼️ Calculate RSSI in dB
+                rssi_db = 10 * np.log10(power + 1e-12)
+
                 if time.time() - last_print > 0.1:
                     compass = ascii_compass(angle)
-                    sys.stdout.write(f"\r[MIMO DF] AoA: {angle:6.1f}° | Phase: {phase:5.2f} rad | [{compass}]")
+                    # ‼️ Display Raw Phase (RawPh) AND RSSI
+                    sys.stdout.write(f"\r[MIMO] RSSI: {rssi_db:3.0f}dB | AoA: {angle:5.1f}° | RawPh: {raw_phase:5.2f} | [{compass}]")
                     sys.stdout.flush()
                     last_print = time.time()
             else:
