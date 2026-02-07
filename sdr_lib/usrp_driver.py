@@ -23,18 +23,17 @@ class B210UnifiedDriver:
 
     def initialize(self):
         """
-        ‼️ Configures the USRP for RX and TX.
         Returns the configured USRP object.
         """
         print(f"--> Scanning for B210 Device (Mode: {self.num_channels}ch)...")
         try:
             self.usrp = uhd.usrp.MultiUSRP(self.device_args)
         except RuntimeError:
-            print("‼️ No USRP found. Ensure a B210 is connected.")
+            print("No USRP found. Ensure a B210 is connected.")
             sys.exit(1)
 
         if self.usrp.get_rx_num_channels() < self.num_channels:
-            print(f"‼️ Error: Device has {self.usrp.get_rx_num_channels()} channels. App requires {self.num_channels}.")
+            print(f"Error: Device has {self.usrp.get_rx_num_channels()} channels. App requires {self.num_channels}.")
             sys.exit(1)
 
         if self.num_channels == 2:
@@ -66,6 +65,24 @@ class B210UnifiedDriver:
         
         return self.usrp
 
+    def tune_frequency(self, freq, channel=0):
+        """
+        ‼️ New Method: Dynamic Frequency Tuning.
+        Allows the application to hop frequencies at runtime without re-initializing.
+        """
+        if not self.usrp:
+            return
+
+        treq = uhd.types.TuneRequest(freq)
+        treq.args = uhd.types.DeviceAddr("mode_n=integer")
+        
+        # Tune RX
+        self.usrp.set_rx_freq(treq, channel)
+        
+
+        # This prevents "garbage" samples immediately after a hop.
+        time.sleep(0.015) 
+
     def get_rx_streamer(self):
         """Helper to get the RX streamer for active channels."""
         if not self.usrp:
@@ -87,7 +104,7 @@ class B210UnifiedDriver:
 
 class PeriodicTransmitter(threading.Thread):
     """
-    ‼️ Runs in a background thread.
+    Runs in a background thread.
     Handles the `while running: send; sleep` logic found in almost every script.
     """
     def __init__(self, driver, sig_handler, frame_data, interval=1.0):
