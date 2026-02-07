@@ -2,8 +2,8 @@ import uhd
 import numpy as np
 import sys
 
-from usrp_driver import B210UnifiedDriver, PeriodicTransmitter 
-import sdr_utils
+from sdr_lib.usrp_driver import B210UnifiedDriver, PeriodicTransmitter 
+from sdr_lib import sdr_utils
 
 
 args = sdr_utils.get_standard_args("Object Detection", default_freq=915e6)

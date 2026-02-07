@@ -2,8 +2,9 @@ import uhd
 import numpy as np
 import sys
 import time
-from usrp_driver import B210UnifiedDriver 
-import sdr_utils
+
+from sdr_lib.usrp_driver import B210UnifiedDriver 
+from sdr_lib import sdr_utils
 
 
 args = sdr_utils.get_standard_args("MIMO Direction Finding", default_freq=433.92e6)

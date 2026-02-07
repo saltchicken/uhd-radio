@@ -1,10 +1,8 @@
 import uhd
 import numpy as np
-import time
-import threading
 
-from usrp_driver import B210UnifiedDriver, PeriodicTransmitter
-import sdr_utils
+from sdr_lib.usrp_driver import B210UnifiedDriver, PeriodicTransmitter
+from sdr_lib import sdr_utils
 
 
 args = sdr_utils.get_standard_args("DBPSK Data Modem", default_gain=50)
