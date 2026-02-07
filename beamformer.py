@@ -6,27 +6,30 @@ import time
 from sdr_lib.usrp_driver import B210UnifiedDriver 
 from sdr_lib import sdr_utils
 
-
-args = sdr_utils.get_standard_args("Digital Beamformer", default_freq=433.92e6, default_gain=60)
+# ‼️ CHANGED: Default to WiFi Channel 1 (2.412 GHz) and higher gain
+args = sdr_utils.get_standard_args("WiFi Direction Finder", default_freq=2.412e9, default_gain=75)
 
 # Physical Configuration
 
-# You MUST use cables to space antennas ~35cm apart for this to work.
-# If you use the B210 ports directly (0.05m), the beam will be uselessly wide.
-ANTENNA_SPACING = 0.35  
+# ‼️ CHANGED: For 2.4 GHz, spacing must be much smaller (~6.25cm).
+# If you leave them at 35cm, you will get "Grating Lobes" (fake peaks every few degrees).
+ANTENNA_SPACING = 0.0625  
 SCAN_SPEED = 2.0        
+# ‼️ NEW: WiFi is bursty, so we use a threshold to ignore noise
+PEAK_THRESHOLD = -40.0
 
 sig_handler = sdr_utils.SignalHandler()
 
 def run_beamformer(usrp, driver):
-    print(f"--> Beamforming Array Active on {args.freq/1e6:.3f} MHz")
-    print(f"--> Spacing: {ANTENNA_SPACING*100:.1f} cm")
+    print(f"--> WiFi Beamformer Active on {args.freq/1e9:.3f} GHz")
+    print(f"--> Required Spacing: {ANTENNA_SPACING*100:.2f} cm (Critical for 2.4GHz)")
     
     # Check for spacing physics
     wavelength = 3e8 / args.freq
-    if ANTENNA_SPACING < (wavelength / 8):
-        print(f"⚠️  WARNING: Spacing ({ANTENNA_SPACING}m) is very small for this wavelength ({wavelength:.2f}m).")
-        print("   Directionality will be extremely poor. Use extension cables!")
+    if ANTENNA_SPACING > (wavelength / 1.5):
+        print(f"\n⚠️  CRITICAL WARNING: Spacing ({ANTENNA_SPACING*100:.1f}cm) is too wide for WiFi!")
+        print(f"   For 2.4GHz, antennas must be ~6.2cm apart.")
+        print("   Current setup will produce 'Grating Lobes' (ghost signals).\n")
     
     rx_streamer = driver.get_rx_streamer()
     
@@ -48,12 +51,14 @@ def run_beamformer(usrp, driver):
     current_angle = -60.0
     scan_direction = 1
     
+    # ‼️ RESTORED: Sweep history for peak searching
+    sweep_history = [] 
 
     last_update_time = time.time()
     
     print("\n[SETUP] ⚠️  B210 Phase Ambiguity Detected.")
-    print("[SETUP] Place source at 0 deg (Boresight) and press Ctrl+C once to Calibrate.")
-    print("[SETUP] Or wait for auto-sweep...\n")
+    print("[SETUP] Place a constant source (phone hotspot) at 0 deg and press Ctrl+C to Calibrate.")
+    print("[SETUP] WiFi beacons are intermittent, so calibration might take a few tries.\n")
     
     try:
         while sig_handler.running:
@@ -67,17 +72,17 @@ def run_beamformer(usrp, driver):
                 ch0 = recv_buffer[0][:samps]
                 ch1 = recv_buffer[1][:samps]
                 
-                # 1. Measurement
-                pwr_ch0 = np.mean(np.abs(ch0)**2)
+                # 1. Measurement - Max Hold for WiFi bursts
+                pwr_ch0 = np.max(np.abs(ch0)**2)
                 pwr_db_omn = 10 * np.log10(pwr_ch0 + 1e-12)
 
 
-                if not calibrated and pwr_db_omn > -30:
+                if not calibrated and pwr_db_omn > -35:
                     correlation = np.mean(ch1 * np.conj(ch0))
                     calibration_offset = np.angle(correlation)
                     calibrated = True
                     print(f"\n[CAL] ✅ LOCKED! Hardware Offset: {np.degrees(calibration_offset):.1f} deg")
-                    print("[CAL] Starting Beam Sweep...\n")
+                    print("[CAL] Starting WiFi Sweep...\n")
 
                 # 2. Compute Steering Phase
                 steer_phase = sdr_utils.calculate_steering_phase(current_angle, args.freq, ANTENNA_SPACING)
@@ -86,12 +91,15 @@ def run_beamformer(usrp, driver):
                 beam_signal = sdr_utils.apply_beamforming(ch0, ch1, steer_phase, calibration_offset)
                 
                 # 4. Measure Beamformed Power
-                pwr_beam = np.mean(np.abs(beam_signal)**2)
+                pwr_beam = np.max(np.abs(beam_signal)**2)
                 pwr_db_beam = 10 * np.log10(pwr_beam + 1e-12)
                 
                 # 5. Calculate "Array Gain"
                 gain_db = pwr_db_beam - pwr_db_omn
                 
+                # ‼️ Record data for DoA calculation
+                if calibrated:
+                    sweep_history.append((current_angle, pwr_db_beam))
 
                 if time.time() - last_update_time > 0.05:
                     
@@ -108,7 +116,7 @@ def run_beamformer(usrp, driver):
                     
                     sys.stdout.write(
                         f"\r[{status}] Angle: {current_angle:5.1f}° [{visual_str}] "
-                        f"Omni: {pwr_db_omn:3.0f}dB | Beam: {pwr_db_beam:3.0f}dB | "
+                        f"Sig: {pwr_db_beam:3.0f}dB | "
                         f"Gain: {gain_db:+4.1f}dB"
                     )
                     sys.stdout.flush()
@@ -116,6 +124,27 @@ def run_beamformer(usrp, driver):
                     # 7. Sweep Logic
                     if calibrated:
                         current_angle += (SCAN_SPEED * scan_direction)
+                        
+                        # Check bounds
+                        hit_upper_limit = (scan_direction == 1 and current_angle >= 60)
+                        hit_lower_limit = (scan_direction == -1 and current_angle <= -60)
+
+                        if hit_upper_limit or hit_lower_limit:
+                            if sweep_history:
+                                # Find tuple with max power
+                                best_angle, peak_pwr = max(sweep_history, key=lambda x: x[1])
+                                
+                                is_edge_artifact = abs(best_angle) >= 58.0
+                                
+                                if peak_pwr > PEAK_THRESHOLD:
+                                    if is_edge_artifact:
+                                         print(f"\n⚠️  [EDGE] Ignored peak at {best_angle:.1f}° (Side lobe/Error)")
+                                    else:
+                                         print(f"\n‼️  [ROUTER FOUND] Direction: {best_angle:.1f}° (Strength: {peak_pwr:.1f} dB)")
+                                
+                                sweep_history = [] 
+
+                        # Reverse direction
                         if current_angle > 60: scan_direction = -1
                         if current_angle < -60: scan_direction = 1
                     
