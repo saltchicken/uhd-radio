@@ -6,7 +6,7 @@ import sys
 import signal
 
 # ==========================================
-# ‼️ CONFIGURATION
+
 # ==========================================
 RX_RATE = 1e6           
 TX_RATE = 1e6
@@ -33,7 +33,7 @@ def handler(signum, frame):
 signal.signal(signal.SIGINT, handler)
 
 # ==========================================
-# ‼️ MODEM FUNCTIONS
+
 # ==========================================
 
 def text_to_bits(text):
@@ -57,7 +57,7 @@ def bits_to_text(bits):
     return "".join(chars)
 
 def modulate_dbpsk(text):
-    # ‼️ FRAMING UPDATE: Prepend Length Byte
+
     # We create a new string where the first char is the length count
     # e.g., "\x0B" + "Hello World" (where \x0B is 11)
     full_payload = chr(len(text)) + text
@@ -66,7 +66,7 @@ def modulate_dbpsk(text):
     samples = []
     current_phase = 0.0
     
-    # ‼️ PREAMBLE GENERATION
+
     # 1. Pilot: 50 symbols of '0' (Constant Phase) for locking
     for _ in range(50):
         symbol = np.exp(1j * current_phase)
@@ -95,7 +95,7 @@ def demodulate_dbpsk_robust(rx_chunk):
     best_text = ""
     best_score = -1
 
-    # ‼️ Brute Force Alignment
+
     # We try offsets 0, 10, 20... 90 to find the center of the symbol
     for offset in range(0, SPS, 10):
         
@@ -112,7 +112,7 @@ def demodulate_dbpsk_robust(rx_chunk):
         # Map to bits: abs(angle) > 90deg is a '1', else '0'
         detected_bits = (np.abs(phase_diffs) > (np.pi / 2)).astype(int)
         
-        # ‼️ 3. Preamble Search
+
         # We expect ~50 zeros at the start. 
         # Let's count how many zeros are in the first 48 bits.
         preamble_zeros = np.sum(detected_bits[:48] == 0)
@@ -121,7 +121,7 @@ def demodulate_dbpsk_robust(rx_chunk):
         if preamble_zeros < 40:
             continue
             
-        # ‼️ 4. Find Sync Marker
+
         try:
             # Look in a small window where we expect the Sync Bit
             sync_window = detected_bits[45:60]
@@ -131,7 +131,7 @@ def demodulate_dbpsk_robust(rx_chunk):
         except IndexError:
             continue
             
-        # ‼️ 5. Decode Length Header (NEW)
+
         # The first 8 bits after sync are now the Length Byte
         len_bits = detected_bits[start_of_data : start_of_data + 8]
         if len(len_bits) < 8: continue
@@ -145,7 +145,7 @@ def demodulate_dbpsk_robust(rx_chunk):
         if msg_len == 0 or msg_len > 100:
             continue
 
-        # ‼️ 6. Decode Exact Payload
+
         payload_start = start_of_data + 8
         payload_end = payload_start + (msg_len * 8)
         
@@ -243,7 +243,7 @@ def rx_thread(usrp):
                 if start_idx + 20000 < samps:
                     packet_chunk = data[start_idx : start_idx + 20000]
                     
-                    # ‼️ Call Robust Decoder
+
                     msg = demodulate_dbpsk_robust(packet_chunk)
                     
                     if len(msg) > 0:

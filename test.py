@@ -45,7 +45,7 @@ def test_receive(usrp, freq=915e6, rate=1e6, gain=20):
     usrp.set_rx_freq(uhd.types.TuneRequest(freq), 0)
     usrp.set_rx_gain(gain, 0)
     
-    # ‼️ Wait for the LO (Local Oscillator) to lock
+
     # This ensures the hardware is stable before streaming
     print("   Waiting for LO lock...")
     max_checks = 10

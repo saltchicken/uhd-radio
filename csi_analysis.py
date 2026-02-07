@@ -6,7 +6,7 @@ import signal
 import sys
 
 # ==========================================
-# ‼️ CONFIGURATION
+
 # ==========================================
 FREQ = 5.8e9
 RATE = 20e6
@@ -17,7 +17,7 @@ THRESHOLD = 0.05
 
 RUNNING = True
 
-# ‼️ ROBUST STREAM MODE SETUP
+
 try:
     STREAM_MODE_START = uhd.types.StreamMode.start_continuous
     STREAM_MODE_STOP = uhd.types.StreamMode.stop_continuous
@@ -34,7 +34,7 @@ def handler(signum, frame):
 signal.signal(signal.SIGINT, handler)
 
 # ==========================================
-# ‼️ SIGNAL GENERATION (Same as Sounder)
+
 # ==========================================
 
 def generate_chirp_probe(length):
@@ -47,7 +47,7 @@ def generate_chirp_probe(length):
 PROBE_TX = generate_chirp_probe(CHIRP_LEN)
 
 # ==========================================
-# ‼️ CSI ANALYSIS ENGINE
+
 # ==========================================
 
 def calculate_csi_metrics(cir_window, sample_rate):
@@ -60,7 +60,7 @@ def calculate_csi_metrics(cir_window, sample_rate):
     # 1. Power Delay Profile (PDP)
     pdp = np.abs(cir_window)**2
     
-    # ‼️ Clean PDP: Filter out noise to get accurate statistics
+
     # We only consider paths that are within 10% of the peak power
     thresh = np.max(pdp) * 0.1
     valid_indices = np.where(pdp > thresh)[0]
@@ -91,7 +91,7 @@ def calculate_csi_metrics(cir_window, sample_rate):
         else:
             coherence_bw = sample_rate
 
-    # ‼️ 2. Frequency Response (CFR) via FFT
+
     # Transform the complex impulse response to frequency domain
     cfr_complex = np.fft.fftshift(np.fft.fft(cir_window))
     cfr_mag_db = 20 * np.log10(np.abs(cfr_complex) + 1e-12)
@@ -119,7 +119,7 @@ def process_rx_packet(rx_chunk):
     snr_db = 10 * np.log10(peak_val / (noise_floor + 1e-9))
     
     if snr_db > 10:
-        # ‼️ Extract significant multipath window for analysis
+
         # We take a slice around the peak to exclude distant noise
         # Window: -10 samples (pre-cursor) to +50 samples (post-cursor/multipath)
         start = max(0, peak_idx - 10)
@@ -127,7 +127,7 @@ def process_rx_packet(rx_chunk):
         
         cir_window = correlation[start:end]
         
-        # ‼️ Run CSI Math
+
         metrics = calculate_csi_metrics(cir_window, RATE)
         metrics['snr_db'] = snr_db
         metrics['peak_val'] = peak_val
@@ -218,7 +218,7 @@ def rx_analysis_loop(usrp):
             data = recv_buffer[0][:samps]
             if np.max(np.abs(data)) > THRESHOLD:
                 
-                # ‼️ Analyze
+
                 result = process_rx_packet(data)
                 
                 if result:

@@ -6,7 +6,7 @@ import signal
 import sys
 
 # ==========================================
-# ‼️ CONFIGURATION
+
 # ==========================================
 FREQ = 915e6
 RATE = 1e6
@@ -17,7 +17,7 @@ THRESHOLD = 0.05   # Detection threshold
 
 RUNNING = True
 
-# ‼️ ROBUST STREAM MODE SETUP
+
 # We define MODE_NAME explicitly to ensure logic downstream works correctly.
 try:
     STREAM_MODE_START = uhd.types.StreamMode.start_continuous
@@ -35,7 +35,7 @@ def handler(signum, frame):
 signal.signal(signal.SIGINT, handler)
 
 # ==========================================
-# ‼️ SIGNAL GENERATION (The Probe)
+
 # ==========================================
 
 def generate_chirp_probe(length):
@@ -56,11 +56,11 @@ def generate_chirp_probe(length):
 
 # Pre-calculate the probe and its conjugate for correlation
 PROBE_TX = generate_chirp_probe(CHIRP_LEN)
-# ‼️ REFERENCE: Time-reversed conjugate is needed for convolution-based correlation
+
 PROBE_REF = np.conj(PROBE_TX[::-1]) 
 
 # ==========================================
-# ‼️ ANALYSIS ENGINE (CIS)
+
 # ==========================================
 
 def analyze_channel_response(rx_chunk, sample_rate=RATE):
@@ -131,7 +131,7 @@ def tx_daemon(usrp):
     st_args.channels = [0]
     tx_streamer = usrp.get_tx_stream(st_args)
     
-    # ‼️ Construct Frame: Silence -> Chirp -> Silence
+
     padding = np.zeros(GAP_LEN, dtype=np.complex64)
     frame = np.concatenate([padding, PROBE_TX, padding])
     
@@ -162,14 +162,14 @@ def rx_analysis_loop(usrp):
     cmd = uhd.types.StreamCMD(STREAM_MODE_START)
     cmd.stream_now = True
     
-    # ‼️ FIX: Explicitly check MODE_NAME variable
+
     if MODE_NAME == "Manual Burst (Fallback)":
         cmd.num_samps = buff_len
     
     rx_streamer.issue_stream_cmd(cmd)
     
     while RUNNING:
-        # ‼️ FIX: Re-issue command only if we are in manual mode
+
         if MODE_NAME == "Manual Burst (Fallback)":
             rx_streamer.issue_stream_cmd(cmd)
             
@@ -186,7 +186,7 @@ def rx_analysis_loop(usrp):
             # Simple energy detection to trigger analysis
             if np.max(np.abs(data)) > THRESHOLD:
                 
-                # ‼️ Run Analysis
+
                 results = analyze_channel_response(data)
                 
                 # Only print valid locks

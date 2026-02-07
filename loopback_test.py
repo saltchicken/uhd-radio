@@ -6,16 +6,16 @@ import sys
 import signal
 
 # ==========================================
-# ‼️ REDESIGN: Constants & Globals
+
 # ==========================================
 RX_RATE = 1e6
 TX_RATE = 1e6
 FREQ = 915e6
-# ‼️ CHANGED: Increased Gain significantly to ensure signal detection
+
 GAIN = 50 
 RUNNING = True
 
-# ‼️ Dynamic StreamMode Resolution (Robust)
+
 try:
     STREAM_MODE_START = uhd.types.StreamMode.start_continuous
     STREAM_MODE_STOP = uhd.types.StreamMode.stop_continuous
@@ -34,7 +34,7 @@ def handler(signum, frame):
 signal.signal(signal.SIGINT, handler)
 
 # ==========================================
-# ‼️ NEW: Dedicated TX Daemon
+
 # ==========================================
 def tx_daemon(usrp):
     """
@@ -46,7 +46,7 @@ def tx_daemon(usrp):
     st_args.channels = [0]
     tx_streamer = usrp.get_tx_stream(st_args)
     
-    # ‼️ Create a distinct Tone Pulse (Longer: 50ms)
+
     num_samps = int(TX_RATE * 0.05) 
     t = np.arange(num_samps) / TX_RATE
     tone = 0.7 * np.exp(1j * 2 * np.pi * 50e3 * t)
@@ -61,7 +61,7 @@ def tx_daemon(usrp):
             md.has_time_spec = False
             tx_streamer.send(tone.reshape(1, -1), md)
             
-            # ‼️ DEBUG: Print when we fire
+
             # print("   [TX Daemon] --> Pulse Sent") 
             time.sleep(1.0)
         except Exception as e:
@@ -71,7 +71,7 @@ def tx_daemon(usrp):
     print("   [TX Daemon] Exiting.")
 
 # ==========================================
-# ‼️ NEW: Main RX Loop (Priority)
+
 # ==========================================
 def run_robust_rx(usrp):
     """
@@ -132,7 +132,7 @@ def run_robust_rx(usrp):
             peak = np.max(magnitudes)
             avg = np.mean(magnitudes)
             
-            # ‼️ CHANGED: Lower threshold to 0.01 to catch weak signals
+
             if peak > 0.01: 
                 pkts_received += 1
                 bar_len = int(peak * 40)
@@ -140,7 +140,7 @@ def run_robust_rx(usrp):
                 bar = "#" * bar_len
                 print(f"   [RX] Pkt #{pkts_received} | Amp: {peak:.4f} | {bar}")
             
-            # ‼️ NEW: Periodic Noise Floor Report (Every 1s)
+
             # This proves the RX is actually working, even if no packets are found.
             if time.time() - debug_timer > 1.0:
                 print(f"   [RX Status] Noise Floor: {avg:.6f} | listening...")
@@ -168,7 +168,7 @@ if __name__ == "__main__":
     usrp.set_rx_gain(GAIN, 0)
     usrp.set_tx_gain(GAIN, 0)
     
-    # ‼️ Antenna Config
+
     usrp.set_tx_antenna("TX/RX", 0)
     usrp.set_rx_antenna("RX2", 0)
     
