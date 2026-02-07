@@ -1,11 +1,9 @@
 import signal
 import numpy as np
-import sys
 import argparse
 
 class SignalHandler:
     """
-    ‼️ Extracted signal handling logic.
     Replaces the global RUNNING variable and handler function in all scripts.
     """
     def __init__(self):
@@ -19,7 +17,6 @@ class SignalHandler:
 
 def get_standard_args(description, default_freq=915e6, default_rate=1e6, default_gain=60):
     """
-    ‼️ Extracted CLI argument parsing. 
     Allows runtime configuration: python app.py --freq 915e6 --gain 70
     """
     parser = argparse.ArgumentParser(description=description)
@@ -38,7 +35,7 @@ def generate_chirp_probe(length):
 
 def correlate_and_detect(rx_chunk, probe_sequence):
     """
-    ‼️ Consolidates the correlation, magnitude, and SNR calculation 
+    Consolidates the correlation, magnitude, and SNR calculation 
     used in channel_sounding, csi_analysis, and object_detection.
     """
     correlation = np.correlate(rx_chunk, probe_sequence, mode='valid')
@@ -167,7 +164,6 @@ def ascii_dual_gauge(value, max_val, width=40):
 
 def ascii_density_map(data, min_db=-90, max_db=-30):
     """
-    ‼️ Added for Waterfall Plotter.
     Maps an array of dB values to density characters.
     """
     # Characters ordered by increasing density/visual weight
@@ -184,3 +180,34 @@ def ascii_density_map(data, min_db=-90, max_db=-30):
         idx = int(norm * (len(chars) - 1))
         line += chars[idx]
     return line
+
+
+def calculate_steering_phase(angle_deg, frequency, spacing_meters):
+    """
+    Calculates the required phase shift (in radians) for a uniform linear array
+    to steer the beam to 'angle_deg' (where 0 is boresight).
+    """
+    wavelength = 3e8 / frequency
+    # Path difference d * sin(theta)
+    # Phase = 2pi * (d * sin(theta) / lambda)
+    theta_rad = np.radians(angle_deg)
+    phase_rad = (2 * np.pi * spacing_meters * np.sin(theta_rad)) / wavelength
+    return phase_rad
+
+
+def apply_beamforming(ch0_samples, ch1_samples, steering_phase_rad, cal_offset_rad=0.0):
+    """
+    Combines two channels constructively for a given steering angle.
+    ch0 is reference. ch1 is shifted to align with ch0.
+    """
+    # Total phase correction = Steering Phase + Calibration Offset
+    # If Ch1 leads Ch0 by 'phi', we multiply Ch1 by exp(-j*phi) to delay it back to sync.
+    total_phase = steering_phase_rad + cal_offset_rad
+    
+    weight = np.exp(-1j * total_phase)
+    
+    # Beamformed Signal = Ch0 + (Ch1 * Weight)
+    # Scale by 0.707 to keep power normalized relative to single element peak potential
+    beamformed = (ch0_samples + (ch1_samples * weight)) * 0.707
+    
+    return beamformed
