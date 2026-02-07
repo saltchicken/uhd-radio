@@ -6,9 +6,9 @@ import signal
 import sys
 
 # ==========================================
-# ‼️ CONFIGURATION
+
 # ==========================================
-# ‼️ REVERTED to 915M/1M for stability. 
+
 # 5.8G/20M causes USB drops and poor SNR with stock antennas.
 FREQ = 915e6
 RATE = 1e6
@@ -17,15 +17,14 @@ CHIRP_LEN = 256
 GAP_LEN = 2000      
 THRESHOLD = 0.05    
 
-# ‼️ OBJECT DETECTION SETTINGS
+
 CALIBRATION_FRAMES = 40      
-SIGMA_MULTIPLIER = 2.0       # ‼️ CHANGED: Aggressively lowered to 2.0 (Standard Deviation)
-MAX_THRESHOLD = 5.0          # ‼️ CHANGED: Tighter clamp (was 15.0) to force sensitivity
+DETECTION_THRESHOLD = 2.5
 CSI_WIN_SIZE = 64            
 
 RUNNING = True
 
-# ‼️ ROBUST STREAM MODE SETUP
+
 try:
     STREAM_MODE_START = uhd.types.StreamMode.start_continuous
     STREAM_MODE_STOP = uhd.types.StreamMode.stop_continuous
@@ -42,7 +41,7 @@ def handler(signum, frame):
 signal.signal(signal.SIGINT, handler)
 
 # ==========================================
-# ‼️ SIGNAL GENERATION
+
 # ==========================================
 
 def generate_chirp_probe(length):
@@ -55,7 +54,7 @@ def generate_chirp_probe(length):
 PROBE_TX = generate_chirp_probe(CHIRP_LEN)
 
 # ==========================================
-# ‼️ CSI ANALYSIS ENGINE
+
 # ==========================================
 
 def calculate_csi_metrics(cir_window, sample_rate):
@@ -88,7 +87,7 @@ def calculate_csi_metrics(cir_window, sample_rate):
         else:
             coherence_bw = sample_rate
 
-    # ‼️ 2. Frequency Response (CFR) via FFT
+
     cfr_complex = np.fft.fftshift(np.fft.fft(cir_window))
     cfr_mag_linear = np.abs(cfr_complex)
     cfr_mag_db = 20 * np.log10(cfr_mag_linear + 1e-12)
@@ -132,7 +131,7 @@ def process_rx_packet(rx_chunk):
         if src_end > src_start:
              cir_window[dst_start:dst_end] = correlation[src_start:src_end]
              
-        # ‼️ ENERGY GUARD: Check if slice is empty/dead
+
         if np.sum(np.abs(cir_window)) < 1e-6:
             return None
         
@@ -205,11 +204,10 @@ def rx_analysis_loop(usrp):
         cmd.num_samps = buff_len
     rx_streamer.issue_stream_cmd(cmd)
 
-    # ‼️ DETECTION STATE
+
     baseline_cfr = None
     cal_frames = []
     frame_count = 0
-    adaptive_threshold = 3.0 # Fallback
     
     print("\n   [DETECTION] 🟡 CALIBRATING... Keep area static.")
     
@@ -239,44 +237,24 @@ def rx_analysis_loop(usrp):
                         sys.stdout.flush()
                         
                         if frame_count == CALIBRATION_FRAMES:
-                            # ‼️ ADAPTIVE THRESHOLD CALCULATION
-                            # 1. Calculate Baseline Mean
+
                             baseline_cfr = np.mean(np.array(cal_frames), axis=0)
                             
-                            # 2. Calculate Variance of the environment
-                            diffs = []
-                            for frame in cal_frames:
-                                diffs.append(np.mean(np.abs(frame - baseline_cfr)))
-                            
-                            noise_mean = np.mean(diffs)
-                            noise_std = np.std(diffs)
-                            
-                            # Set threshold to Mean + N * Sigma
-                            adaptive_threshold = noise_mean + (SIGMA_MULTIPLIER * noise_std)
-                            
-                            # Safety floor for threshold (1.0 dB minimum)
-                            if adaptive_threshold < 1.0: adaptive_threshold = 1.0
-
-                            # ‼️ NEW: Max clamp
-                            if adaptive_threshold > MAX_THRESHOLD:
-                                print(f"\n   [WARN] Threshold calc too high ({adaptive_threshold:.2f}). Clamping to {MAX_THRESHOLD}.")
-                                adaptive_threshold = MAX_THRESHOLD
-                            
                             print(f"\n   [DETECTION] 🟢 Calibration Complete.")
-                            print(f"   [DETECTION] 📏 Noise Mean: {noise_mean:.2f} | StdDev: {noise_std:.2f}")
-                            print(f"   [DETECTION] 📏 Final Threshold: {adaptive_threshold:.2f}")
+                            print(f"   [DETECTION] 📏 Using Fixed Threshold: {DETECTION_THRESHOLD:.2f}")
                             
                     else:
                         # Compare Current vs Baseline
                         diff_vector = np.abs(current_cfr - baseline_cfr)
                         anomaly_score = np.mean(diff_vector)
                         
-                        is_detected = anomaly_score > adaptive_threshold
+
+                        is_detected = anomaly_score > DETECTION_THRESHOLD
                         status_icon = "🔴 OBJECT DETECTED" if is_detected else "🟢 Clear"
                         
                         print("-" * 60)
                         print(f"‼️ STATUS: {status_icon}")
-                        print(f"   Anomaly Score: {anomaly_score:.2f} (Thresh: {adaptive_threshold:.2f})")
+                        print(f"   Anomaly Score: {anomaly_score:.2f} (Thresh: {DETECTION_THRESHOLD:.2f})")
                         print(f"   Baseline: [{ascii_bar_chart(baseline_cfr)}]")
                         print(f"   Current:  [{ascii_bar_chart(current_cfr)}]")
                         print(f"   Delta:    [{ascii_bar_chart(diff_vector)}]")
